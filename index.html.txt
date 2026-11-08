@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="투데잇">
+  <title>투데잇</title>
+
+  <!-- 아이폰 홈 화면 추가 시 회색 글자 대신 고화질 아이콘이 100% 뜨도록 즉시 렌더링하는 스크립트 -->
+  <script>
+    function applyAppleIcon(emoji, bgColor) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+
+      // 배경 색상 채우기
+      ctx.fillStyle = bgColor || '#4f46e5';
+      ctx.fillRect(0, 0, 512, 512);
+
+      // 중앙 이모지 그리기
+      ctx.font = '280px -apple-system, BlinkMacSystemFont, "Apple Color Emoji", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(emoji || '📚', 256, 275);
+
+      const dataUrl = canvas.toDataURL('image/png');
+
+      // 기존 아이콘 태그 제거 후 새로 주입
+      document.querySelectorAll("link[rel*='icon']").forEach(el => el.remove());
+
+      const appleLink = document.createElement('link');
+      appleLink.rel = 'apple-touch-icon';
+      appleLink.href = dataUrl;
+      document.head.appendChild(appleLink);
+
+      const favLink = document.createElement('link');
+      favLink.rel = 'icon';
+      favLink.type = 'image/png';
+      favLink.href = dataUrl;
+      document.head.appendChild(favLink);
+    }
+
+    // 저장된 아이콘 설정 불러오기 (기본값: 인디고 배경 + 📚)
+    const savedIcon = JSON.parse(localStorage.getItem('todait_icon_v1')) || { emoji: '📚', bg: '#4f46e5' };
+    applyAppleIcon(savedIcon.emoji, savedIcon.bg);
+  </script>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { -webkit-tap-highlight-color: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .day-btn.active { background-color: #4f46e5; color: white; border-color: #4f46e5; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen pb-24">
+
+  <!-- 상단 헤더 -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-20 px-4 py-3 flex justify-between items-center shadow-xs">
+    <div class="flex items-center gap-2">
+      <button onclick="toggleIconModal(true)" id="headerEmojiBtn" class="w-8 h-8 rounded-xl flex items-center justify-center text-lg shadow-2xs border border-slate-200" title="아이콘 변경">
+        📚
+      </button>
+      <h1 class="text-lg font-extrabold tracking-tight text-slate-900">투데잇 플래너</h1>
+    </div>
+    <div class="flex gap-1.5">
+      <button onclick="goToday()" class="bg-slate-100 active:bg-slate-200 text-slate-700 text-xs font-bold px-2.5 py-2 rounded-xl transition">
+        오늘
+      </button>
+      <button onclick="toggleIconModal(true)" class="bg-amber-50 active:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold px-2.5 py-2 rounded-xl transition">
+        🎨 아이콘
+      </button>
+      <button onclick="toggleModal(true)" class="bg-indigo-600 active:bg-indigo-700 text-white text-xs font-bold px-3 py-2 rounded-xl shadow-xs transition">
+        + 과목 추가
+      </button>
+    </div>
+  </header>
+
+  <main class="max-w-md mx-auto p-4 space-y-5">
+
+    <!-- 1. 과목별 전체 달성률 섹션 -->
+    <section>
+      <div class="flex justify-between items-center mb-2">
+        <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider">과목별 목표 달성률</h2>
+        <span id="totalSummary" class="text-xs font-bold text-indigo-600"></span>
+      </div>
+      <div id="courseList" class="space-y-2.5"></div>
+    </section>
+
+    <!-- 2. 주간 네비게이션 & 일별 계획 섹션 -->
+    <section class="bg-white rounded-2xl p-4 shadow-xs border border-slate-200/80">
+      <!-- 주간 이동 (2026~2027) -->
+      <div class="flex justify-between items-center mb-3 pb-3 border-b border-slate-100">
+        <button onclick="changeWeek(-7)" class="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 active:bg-slate-200 text-slate-600 font-bold">◀</button>
+        <div class="text-center">
+          <div id="weekRangeTitle" class="text-sm font-extrabold text-slate-900">2026.11.02 ~ 11.08</div>
+          <p id="weekProgressText" class="text-xs text-slate-500 mt-0.5">이번 주 0 / 0강 완료 (0%)</p>
+        </div>
+        <button onclick="changeWeek(7)" class="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 active:bg-slate-200 text-slate-600 font-bold">▶</button>
+      </div>
+
+      <!-- 핵심 컨트롤 버튼 3종 (토요일 보충 / 다음주 이월 / 균등 재분배) -->
+      <div class="grid grid-cols-3 gap-1.5 mb-4">
+        <button onclick="moveMissedToSaturday()" class="bg-amber-50 active:bg-amber-100 text-amber-800 border border-amber-200/80 text-[11px] font-bold py-2 px-1.5 rounded-xl transition flex flex-col items-center justify-center gap-0.5">
+          <span>🔥 토요일로 몰기</span>
+          <span class="text-[10px] font-normal text-amber-600">주중 미달성 보충</span>
+        </button>
+        <button onclick="pushWeekToNextMonday()" class="bg-rose-50 active:bg-rose-100 text-rose-700 border border-rose-200/80 text-[11px] font-bold py-2 px-1.5 rounded-xl transition flex flex-col items-center justify-center gap-0.5">
+          <span>⏩ 다음 주로 이월</span>
+          <span class="text-[10px] font-normal text-rose-500">이번 주 미완료분</span>
+        </button>
+        <button onclick="redistributeAll()" class="bg-indigo-50 active:bg-indigo-100 text-indigo-700 border border-indigo-200/80 text-[11px] font-bold py-2 px-1.5 rounded-xl transition flex flex-col items-center justify-center gap-0.5">
+          <span>🔄 일별 재분배</span>
+          <span class="text-[10px] font-normal text-indigo-500">남은 기간 N분의1</span>
+        </button>
+      </div>
+
+      <!-- 월~일 일별 강의 리스트 -->
+      <div id="dailyScheduleList" class="space-y-3"></div>
+    </section>
+
+  </main>
+
+  <!-- 홈화면 아이콘 커스텀 모달 -->
+  <div id="iconModal" class="fixed inset-0 bg-black/50 z-30 hidden items-center justify-center p-4 backdrop-blur-xs">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-xl">
+      <div class="flex justify-between items-center">
+        <h3 class="text-base font-extrabold text-slate-900">아이폰 홈화면 아이콘 꾸미기</h3>
+        <button onclick="toggleIconModal(false)" class="text-slate-400 hover:text-slate-600 text-lg font-bold">✕</button>
+      </div>
+      <p class="text-xs text-slate-500 leading-relaxed">
+        원하는 이모티콘과 배경색을 고른 뒤 <b>[적용하기]</b>를 누르고 사파리 하단 <b>[공유 ⬆️] ➔ [홈 화면에 추가]</b>를 누르면 아래 모양 그대로 예쁜 앱 아이콘이 생성됩니다!
+      </p>
+      <div class="flex justify-center py-2">
+        <div id="iconPreview" class="w-20 h-20 rounded-2xl flex items-center justify-center text-4xl shadow-md" style="background-color: #4f46e5;">
+          📚
+        </div>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs font-bold text-slate-600 block mb-1">아이콘 이모티콘 선택 (직접 입력 가능)</label>
+          <div class="flex gap-1.5 mb-2">
+            <button type="button" onclick="setPreviewEmoji('📚')" class="flex-1 py-1.5 bg-slate-100 rounded-lg text-lg">📚</button>
+            <button type="button" onclick="setPreviewEmoji('🐣')" class="flex-1 py-1.5 bg-slate-100 rounded-lg text-lg">🐣</button>
+            <button type="button" onclick="setPreviewEmoji('🐾')" class="flex-1 py-1.5 bg-slate-100 rounded-lg text-lg">🐾</button>
+            <button type="button" onclick="setPreviewEmoji('💊')" class="flex-1 py-1.5 bg-slate-100 rounded-lg text-lg">💊</button>
+            <button type="button" onclick="setPreviewEmoji('💖')" class="flex-1 py-1.5 bg-slate-100 rounded-lg text-lg">💖</button>
+            <button type="button" onclick="setPreviewEmoji('🔥')" class="flex-1 py-1.5 bg-slate-100 rounded-lg text-lg">🔥</button>
+          </div>
+          <input id="customEmojiInput" type="text" maxlength="2" value="📚" oninput="setPreviewEmoji(this.value)" class="w-full border border-slate-200 rounded-xl px-3 py-2 text-center text-base">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-600 block mb-1">아이콘 배경색 선택</label>
+          <div class="flex justify-between gap-2 pt-1">
+            <button type="button" onclick="setPreviewBg('#4f46e5')" class="w-9 h-9 rounded-full bg-[#4f46e5] border-2 border-white shadow"></button>
+            <button type="button" onclick="setPreviewBg('#f43f5e')" class="w-9 h-9 rounded-full bg-[#f43f5e] border-2 border-white shadow"></button>
+            <button type="button" onclick="setPreviewBg('#10b981')" class="w-9 h-9 rounded-full bg-[#10b981] border-2 border-white shadow"></button>
+            <button type="button" onclick="setPreviewBg('#f59e0b')" class="w-9 h-9 rounded-full bg-[#f59e0b] border-2 border-white shadow"></button>
+            <button type="button" onclick="setPreviewBg('#0ea5e9')" class="w-9 h-9 rounded-full bg-[#0ea5e9] border-2 border-white shadow"></button>
+            <button type="button" onclick="setPreviewBg('#1e293b')" class="w-9 h-9 rounded-full bg-[#1e293b] border-2 border-white shadow"></button>
+          </div>
+        </div>
+      </div>
+      <button onclick="saveCustomIcon()" class="w-full py-2.5 text-sm font-bold text-white bg-indigo-600 active:bg-indigo-700 rounded-xl">
+        아이콘 적용하기
+      </button>
+    </div>
+  </div>
+
+  <!-- 과목 추가 모달 -->
+  <div id="addModal" class="fixed inset-0 bg-black/50 z-30 hidden items-center justify-center p-4 backdrop-blur-xs">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-xl max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center">
+        <h3 class="text-base font-extrabold text-slate-900">새 과목 일별 계획 세우기</h3>
+        <button onclick="toggleModal(false)" class="text-slate-400 hover:text-slate-600 text-lg font-bold">✕</button>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs font-bold text-slate-600 block mb-1">과목명</label>
+          <input id="courseName" type="text" placeholder="예: 생물 올인원, 유기화학" class="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <div class="grid grid-cols-2 gap-2.5">
+          <div>
+            <label class="text-xs font-bold text-slate-600 block mb-1">시작 강의 번호 (중간부터 가능)</label>
+            <input id="startLec" type="number" placeholder="예: 12" value="1" min="1" class="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+          </div>
+          <div>
+            <label class="text-xs font-bold text-slate-600 block mb-1">끝 강의 번호</label>
+            <input id="endLec" type="number" placeholder="예: 60" min="1" class="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2.5">
+          <div>
+            <label class="text-xs font-bold text-slate-600 block mb-1">시작 날짜 (2026~2027)</label>
+            <input id="startDateInput" type="date" min="2026-01-01" max="2027-12-31" class="w-full border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:border-indigo-500">
+          </div>
+          <div>
+            <label class="text-xs font-bold text-slate-600 block mb-1">목표 완강일</label>
+            <input id="endDateInput" type="date" min="2026-01-01" max="2027-12-31" class="w-full border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:border-indigo-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="text-xs font-bold text-slate-600 block mb-1">
+            진도 나갈 요일 선택 <span class="text-[11px] font-normal text-slate-400">(토요일을 비워두면 보충용으로 쓰기 좋아요)</span>
+          </label>
+          <div class="grid grid-cols-7 gap-1 pt-0.5" id="dayPicker">
+            <button type="button" onclick="toggleDay(1)" data-day="1" class="day-btn active py-2 rounded-lg border border-slate-200 text-xs font-bold">월</button>
+            <button type="button" onclick="toggleDay(2)" data-day="2" class="day-btn active py-2 rounded-lg border border-slate-200 text-xs font-bold">화</button>
+            <button type="button" onclick="toggleDay(3)" data-day="3" class="day-btn active py-2 rounded-lg border border-slate-200 text-xs font-bold">수</button>
+            <button type="button" onclick="toggleDay(4)" data-day="4" class="day-btn active py-2 rounded-lg border border-slate-200 text-xs font-bold">목</button>
+            <button type="button" onclick="toggleDay(5)" data-day="5" class="day-btn active py-2 rounded-lg border border-slate-200 text-xs font-bold">금</button>
+            <button type="button" onclick="toggleDay(6)" data-day="6" class="day-btn py-2 rounded-lg border border-slate-200 text-xs font-bold text-slate-500">토</button>
+            <button type="button" onclick="toggleDay(0)" data-day="0" class="day-btn py-2 rounded-lg border border-slate-200 text-xs font-bold text-rose-500">일</button>
+          </div>
+        </div>
+
+        <div>
+          <label class="text-xs font-bold text-slate-600 block mb-1">과목 색상</label>
+          <div class="flex gap-2 pt-1" id="colorPicker">
+            <button type="button" onclick="selectColor('indigo')" data-color="indigo" class="w-7 h-7 rounded-full bg-indigo-600 ring-2 ring-offset-2 ring-slate-800"></button>
+            <button type="button" onclick="selectColor('emerald')" data-color="emerald" class="w-7 h-7 rounded-full bg-emerald-500"></button>
+            <button type="button" onclick="selectColor('rose')" data-color="rose" class="w-7 h-7 rounded-full bg-rose-500"></button>
+            <button type="button" onclick="selectColor('amber')" data-color="amber" class="w-7 h-7 rounded-full bg-amber-500"></button>
+            <button type="button" onclick="selectColor('sky')" data-color="sky" class="w-7 h-7 rounded-full bg-sky-500"></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex gap-2 pt-2">
+        <button onclick="toggleModal(false)" class="flex-1 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 rounded-xl">취소</button>
+        <button onclick="addCourse()" class="flex-1 py-2.5 text-sm font-bold text-white bg-indigo-600 active:bg-indigo-700 rounded-xl">일별 자동 배분</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'todait_daily_v2';
+    const KOR_DAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+    const colorMap = {
+      indigo: { bar: 'bg-indigo-600', badge: 'bg-indigo-100 text-indigo-700' },
+      emerald: { bar: 'bg-emerald-500', badge: 'bg-emerald-100 text-emerald-700' },
+      rose: { bar: 'bg-rose-500', badge: 'bg-rose-100 text-rose-700' },
+      amber: { bar: 'bg-amber-500', badge: 'bg-amber-100 text-amber-800' },
+      sky: { bar: 'bg-sky-500', badge: 'bg-sky-100 text-sky-700' }
+    };
+
+    // 아이콘 커스텀 상태
+    let tempEmoji = savedIcon.emoji || '📚';
+    let tempBg = savedIcon.bg || '#4f46e5';
+
+    function updateHeaderIconBtn() {
+      const btn = document.getElementById('headerEmojiBtn');
+      btn.textContent = tempEmoji;
+      btn.style.backgroundColor = tempBg;
+      btn.style.color = '#fff';
+    }
+    updateHeaderIconBtn();
+
+    function toggleIconModal(show) {
+      const modal = document.getElementById('iconModal');
+      if (show) {
+        document.getElementById('iconPreview').textContent = tempEmoji;
+        document.getElementById('iconPreview').style.backgroundColor = tempBg;
+        document.getElementById('customEmojiInput').value = tempEmoji;
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      } else {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+      }
+    }
+
+    function setPreviewEmoji(val) {
+      if (!val) return;
+      tempEmoji = val;
+      document.getElementById('iconPreview').textContent = val;
+      document.getElementById('customEmojiInput').value = val;
+    }
+
+    function setPreviewBg(color) {
+      tempBg = color;
+      document.getElementById('iconPreview').style.backgroundColor = color;
+    }
+
+    function saveCustomIcon() {
+      localStorage.setItem('todait_icon_v1', JSON.stringify({ emoji: tempEmoji, bg: tempBg }));
+      applyAppleIcon(tempEmoji, tempBg);
+      updateHeaderIconBtn();
+      toggleIconModal(false);
+      alert('새 아이콘이 적용되었습니다! 이제 사파리 하단 [공유 ⬆️] ➔ [홈 화면에 추가]를 누르시면 이 아이콘으로 등록됩니다.');
+    }
+
+    // 날짜 유틸 함수
+    function toDateStr(dateObj) {
+      const y = dateObj.getFullYear();
+      const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const d = String(dateObj.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+
+    function parseDateStr(str) {
+      const [y, m, d] = str.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+
+    function addDays(dateStr, days) {
+      const d = parseDateStr(dateStr);
+      d.setDate(d.getDate() + days);
+      return toDateStr(d);
+    }
+
+    function getMondayStr(dateStr) {
+      const d = parseDateStr(dateStr);
+      const day = d.getDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      d.setDate(d.getDate() + diff);
+      return toDateStr(d);
+    }
+
+    const todayStr = toDateStr(new Date());
+
+    let state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {
+      currentMonday: getMondayStr(todayStr),
+      courses: []
+    };
+
+    if (!state.currentMonday) state.currentMonday = getMondayStr(todayStr);
+
+    let selectedColor = 'indigo';
+    let selectedDays = [1, 2, 3, 4, 5];
+
+    function saveState() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      render();
+    }
+
+    function goToday() {
+      state.currentMonday = getMondayStr(toDateStr(new Date()));
+      saveState();
+    }
+
+    function changeWeek(deltaDays) {
+      const nextMonday = addDays(state.currentMonday, deltaDays);
+      if (nextMonday < '2026-01-01' || nextMonday > '2027-12-31') {
+        alert('2026년~2027년 범위 내에서만 이동할 수 있습니다.');
+        return;
+      }
+      state.currentMonday = nextMonday;
+      saveState();
+    }
+
+    function toggleDay(dayNum) {
+      if (selectedDays.includes(dayNum)) {
+        selectedDays = selectedDays.filter(d => d !== dayNum);
+      } else {
+        selectedDays.push(dayNum);
+      }
+      document.querySelectorAll('#dayPicker button').forEach(btn => {
+        const d = parseInt(btn.dataset.day, 10);
+        if (selectedDays.includes(d)) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      });
+    }
+
+    function selectColor(color) {
+      selectedColor = color;
+      document.querySelectorAll('#colorPicker button').forEach(btn => {
+        if (btn.dataset.color === color) {
+          btn.className = `w-7 h-7 rounded-full bg-${color === 'indigo' ? 'indigo-600' : color + '-500'} ring-2 ring-offset-2 ring-slate-800`;
+        } else {
+          btn.className = `w-7 h-7 rounded-full bg-${btn.dataset.color === 'indigo' ? 'indigo-600' : btn.dataset.color + '-500'}`;
+        }
+      });
+    }
+
+    function toggleModal(show) {
+      const modal = document.getElementById('addModal');
+      if (show) {
+        const nowStr = toDateStr(new Date());
+        document.getElementById('startDateInput').value = nowStr;
+        document.getElementById('endDateInput').value = addDays(nowStr, 27);
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      } else {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+      }
+    }
+
+    function getValidStudyDates(startStr, endStr, studyDaysArr) {
+      const validDates = [];
+      let curr = parseDateStr(startStr);
+      const end = parseDateStr(endStr);
+      while (curr <= end) {
+        if (studyDaysArr.includes(curr.getDay())) {
+          validDates.push(toDateStr(curr));
+        }
+        curr.setDate(curr.getDate() + 1);
+      }
+      return validDates;
+    }
+
+    function addCourse() {
+      const name = document.getElementById('courseName').value.trim();
+      const startLec = parseInt(document.getElementById('startLec').value, 10);
+      const endLec = parseInt(document.getElementById('endLec').value, 10);
+      const startDate = document.getElementById('startDateInput').value;
+      const endDate = document.getElementById('endDateInput').value;
+
+      if (!name || isNaN(startLec) || isNaN(endLec) || endLec < startLec) {
+        alert('과목명과 시작/끝 강의 번호를 정확히 입력해주세요.');
+        return;
+      }
+      if (!startDate || !endDate || endDate < startDate) {
+        alert('시작 날짜와 목표 완강일을 올바르게 선택해주세요.');
+        return;
+      }
+      if (selectedDays.length === 0) {
+        alert('진도를 나갈 요일을 최소 1개 이상 선택해주세요.');
+        return;
+      }
+
+      const validDates = getValidStudyDates(startDate, endDate, selectedDays);
+      if (validDates.length === 0) {
+        alert('선택한 기간 내에 해당 공부 요일이 없습니다. 기간이나 요일을 조정해주세요.');
+        return;
+      }
+
+      const totalCount = endLec - startLec + 1;
+      const lectures = [];
+
+      for (let i = 0; i < totalCount; i++) {
+        const lecNum = startLec + i;
+        const dateIdx = Math.floor((i * validDates.length) / totalCount);
+        lectures.push({
+          id: 'lec_' + Date.now() + '_' + i,
+          num: lecNum,
+          title: `${lecNum}강`,
+          date: validDates[dateIdx],
+          done: false
+        });
+      }
+
+      state.courses.push({
+        id: 'course_' + Date.now(),
+        name,
+        color: selectedColor,
+        startLec,
+        endLec,
+        startDate,
+        endDate,
+        studyDays: [...selectedDays],
+        lectures
+      });
+
+      state.currentMonday = getMondayStr(startDate);
+      document.getElementById('courseName').value = '';
+      document.getElementById('endLec').value = '';
+      toggleModal(false);
+      saveState();
+    }
+
+    function deleteCourse(courseId) {
+      if (!confirm('이 과목과 모든 강의 계획을 삭제할까요?')) return;
+      state.courses = state.courses.filter(c => c.id !== courseId);
+      saveState();
+    }
+
+    function toggleLecture(courseId, lecId) {
+      const course = state.courses.find(c => c.id === courseId);
+      if (!course) return;
+      const lec = course.lectures.find(l => l.id === lecId);
+      if (lec) {
+        lec.done = !lec.done;
+        saveState();
+      }
+    }
+
+    function delayOneDay(courseId, lecId, event) {
+      event.stopPropagation();
+      const course = state.courses.find(c => c.id === courseId);
+      if (!course) return;
+      const lec = course.lectures.find(l => l.id === lecId);
+      if (lec) {
+        lec.date = addDays(lec.date, 1);
+        saveState();
+      }
+    }
+
+    function moveMissedToSaturday() {
+      const monStr = state.currentMonday;
+      const friStr = addDays(monStr, 4);
+      const satStr = addDays(monStr, 5);
+      let count = 0;
+
+      state.courses.forEach(course => {
+        course.lectures.forEach(lec => {
+          if (!lec.done && lec.date >= monStr && lec.date <= friStr) {
+            lec.date = satStr;
+            count++;
+          }
+        });
+      });
+
+      if (count === 0) {
+        alert('이번 주 평일(월~금)에 밀린 미달성 강의가 없습니다!');
+        return;
+      }
+      saveState();
+      alert(`평일 미달성 강의 ${count}개를 이번 주 토요일(${satStr.slice(5)}) 보충 일정으로 모았습니다!`);
+    }
+
+    function pushWeekToNextMonday() {
+      const monStr = state.currentMonday;
+      const sunStr = addDays(monStr, 6);
+      const nextMonStr = addDays(monStr, 7);
+      let count = 0;
+
+      state.courses.forEach(course => {
+        course.lectures.forEach(lec => {
+          if (!lec.done && lec.date >= monStr && lec.date <= sunStr) {
+            lec.date = nextMonStr;
+            count++;
+          }
+        });
+      });
+
+      if (count === 0) {
+        alert('이번 주에 남아있는 미달성 강의가 없습니다!');
+        return;
+      }
+      state.currentMonday = nextMonStr;
+      saveState();
+      alert(`이번 주 미완료 강의 ${count}개를 다음 주 월요일(${nextMonStr.slice(5)})로 이월했습니다.`);
+    }
+
+    function redistributeAll() {
+      const baseDateStr = state.currentMonday;
+      let count = 0;
+
+      state.courses.forEach(course => {
+        const remaining = course.lectures
+          .filter(l => !l.done && l.date >= baseDateStr)
+          .sort((a, b) => a.num - b.num);
+
+        if (remaining.length === 0) return;
+
+        const targetEnd = course.endDate > baseDateStr ? course.endDate : addDays(baseDateStr, 6);
+        let validDates = getValidStudyDates(baseDateStr, targetEnd, course.studyDays || [1,2,3,4,5]);
+        if (validDates.length === 0) validDates = [baseDateStr];
+
+        remaining.forEach((lec, idx) => {
+          const dIdx = Math.floor((idx * validDates.length) / remaining.length);
+          lec.date = validDates[dIdx];
+        });
+        count++;
+      });
+
+      if (count === 0) {
+        alert('재분배할 미완료 강의가 없습니다.');
+        return;
+      }
+      saveState();
+      alert('남은 미완료 강의를 목표 기간 내 공부 요일에 맞춰 일별로 균등 재분배했습니다!');
+    }
+
+    function render() {
+      const courseListEl = document.getElementById('courseList');
+      const dailyListEl = document.getElementById('dailyScheduleList');
+      const weekRangeTitleEl = document.getElementById('weekRangeTitle');
+      const weekProgressTextEl = document.getElementById('weekProgressText');
+      const totalSummaryEl = document.getElementById('totalSummary');
+
+      const monStr = state.currentMonday;
+      const sunStr = addDays(monStr, 6);
+      weekRangeTitleEl.textContent = `${monStr.replace(/-/g, '.')} (월) ~ ${sunStr.slice(5).replace(/-/g, '.')} (일)`;
+
+      if (state.courses.length === 0) {
+        courseListEl.innerHTML = `
+          <div class="bg-white rounded-2xl p-5 text-center border border-dashed border-slate-300 text-slate-400 text-xs leading-relaxed">
+            우측 상단 <b>[+ 과목 추가]</b>를 눌러<br>시작 강의 번호와 기간, 공부 요일을 설정해보세요!
+          </div>`;
+        totalSummaryEl.textContent = '';
+      } else {
+        let allTotal = 0;
+        let allDone = 0;
+
+        courseListEl.innerHTML = state.courses.map(course => {
+          const total = course.lectures.length;
+          const done = course.lectures.filter(l => l.done).length;
+          const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+          const theme = colorMap[course.color] || colorMap.indigo;
+
+          allTotal += total;
+          allDone += done;
+
+          return `
+            <div class="bg-white rounded-2xl p-3.5 shadow-2xs border border-slate-200/80">
+              <div class="flex justify-between items-center mb-1.5">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[11px] font-bold px-2 py-0.5 rounded-md ${theme.badge}">${course.startLec}~${course.endLec}강</span>
+                  <h3 class="font-extrabold text-slate-900 text-sm">${course.name}</h3>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-extrabold text-slate-800">${percent}% <span class="text-[11px] font-normal text-slate-400">(${done}/${total})</span></span>
+                  <button onclick="deleteCourse('${course.id}')" class="text-slate-300 hover:text-rose-500 text-xs">✕</button>
+                </div>
+              </div>
+              <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                <div class="${theme.bar} h-full transition-all duration-300 rounded-full" style="width: ${percent}%"></div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        const totalPercent = allTotal > 0 ? Math.round((allDone / allTotal) * 100) : 0;
+        totalSummaryEl.textContent = `총 ${totalPercent}% (${allDone}/${allTotal}강)`;
+      }
+
+      let weekTotal = 0;
+      let weekDone = 0;
+      let daysHtml = '';
+      const realToday = toDateStr(new Date());
+
+      for (let i = 0; i < 7; i++) {
+        const dStr = addDays(monStr, i);
+        const dObj = parseDateStr(dStr);
+        const dayIdx = dObj.getDay();
+        const dayLabel = KOR_DAYS[dayIdx];
+        const isSat = dayIdx === 6;
+        const isSun = dayIdx === 0;
+        const isToday = dStr === realToday;
+
+        const dayItems = [];
+        state.courses.forEach(course => {
+          course.lectures.forEach(lec => {
+            if (lec.date === dStr) {
+              dayItems.push({ course, lec });
+            }
+          });
+        });
+
+        weekTotal += dayItems.length;
+        const doneInDay = dayItems.filter(item => item.lec.done).length;
+        weekDone += doneInDay;
+
+        let badgeClass = 'bg-slate-100 text-slate-700';
+        if (isSat) badgeClass = 'bg-amber-100 text-amber-800';
+        if (isSun) badgeClass = 'bg-rose-100 text-rose-700';
+        if (isToday) badgeClass = 'bg-indigo-600 text-white';
+
+        daysHtml += `
+          <div class="rounded-xl border ${isToday ? 'border-indigo-400 bg-indigo-50/20' : isSat ? 'border-amber-200/80 bg-amber-50/20' : 'border-slate-200/80 bg-slate-50/40'} p-3">
+            <div class="flex justify-between items-center mb-2">
+              <div class="flex items-center gap-1.5">
+                <span class="text-xs font-extrabold px-2 py-0.5 rounded-lg ${badgeClass}">
+                  ${dStr.slice(5).replace('-', '/')} (${dayLabel})
+                </span>
+                ${isToday ? '<span class="text-[11px] font-bold text-indigo-600">오늘</span>' : ''}
+                ${isSat ? '<span class="text-[11px] font-semibold text-amber-700">보충 데이</span>' : ''}
+              </div>
+              <span class="text-[11px] font-semibold text-slate-400">
+                ${dayItems.length > 0 ? `${doneInDay}/${dayItems.length} 완료` : '일정 없음'}
+              </span>
+            </div>
+
+            ${dayItems.length === 0 ? `
+              <p class="text-xs text-slate-300 py-1 pl-1">배정된 강의가 없습니다.</p>
+            ` : `
+              <div class="space-y-1.5">
+                ${dayItems.map(({ course, lec }) => {
+                  const theme = colorMap[course.color] || colorMap.indigo;
+                  return `
+                    <div onclick="toggleLecture('${course.id}', '${lec.id}')"
+                      class="flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition ${
+                        lec.done
+                          ? 'bg-slate-100/70 border-slate-200 text-slate-400 line-through'
+                          : 'bg-white border-slate-200/90 text-slate-800 shadow-2xs active:bg-slate-50'
+                      }">
+                      <div class="flex items-center gap-2.5 min-w-0">
+                        <div class="w-5 h-5 rounded-md shrink-0 flex items-center justify-center border ${
+                          lec.done ? `${theme.bar} border-transparent text-white` : 'border-slate-300 bg-white'
+                        }">
+                          ${lec.done ? '✓' : ''}
+                        </div>
+                        <span class="text-[11px] font-bold px-1.5 py-0.5 rounded ${theme.badge} shrink-0">${course.name}</span>
+                        <span class="text-sm font-bold truncate">${lec.title}</span>
+                      </div>
+                      ${!lec.done ? `
+                        <button onclick="delayOneDay('${course.id}', '${lec.id}', event)"
+                          class="text-[11px] font-semibold text-slate-400 hover:text-indigo-600 bg-slate-100 px-2 py-1 rounded-lg shrink-0 ml-2">
+                          +1일 미루기
+                        </button>
+                      ` : ''}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
+          </div>
+        `;
+      }
+
+      dailyListEl.innerHTML = daysHtml;
+      const wPercent = weekTotal > 0 ? Math.round((weekDone / weekTotal) * 100) : 0;
+      weekProgressTextEl.textContent = `이번 주 ${weekDone} / ${weekTotal}강 완료 (${wPercent}%)`;
+    }
+
+    render();
+  </script>
+</body>
+</html>
